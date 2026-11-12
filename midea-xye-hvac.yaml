@@ -33,7 +33,7 @@ substitutions:
   follow_me_source_f: "true"
 
 external_components:
-  - source: github://GITHUB_OWNER/midea-xye-hvac@main
+  - source: github://deathvenom-qvp/midea-xye-hvac@main
     components: [xye_climate]
     refresh: 1d
 

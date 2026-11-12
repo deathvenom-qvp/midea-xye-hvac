@@ -21,7 +21,7 @@ esphome:
   friendly_name: ${friendly_name}
   name_add_mac_suffix: true
   project:
-    name: "GITHUB_OWNER.midea-xye-hvac"
+    name: "deathvenom-qvp.midea-xye-hvac"
     version: "1.0.0"
 
 esp32:
@@ -32,7 +32,7 @@ esp32:
 
 packages:
   midea_xye:
-    url: https://github.com/GITHUB_OWNER/midea-xye-hvac
+    url: https://github.com/deathvenom-qvp/midea-xye-hvac
     ref: main
     files: [midea-xye-hvac.yaml]
     refresh: 1d
