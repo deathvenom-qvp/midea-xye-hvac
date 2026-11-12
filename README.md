@@ -61,4 +61,8 @@ should work; if yours reports something odd, see
 
 ## License
 
-MIT
+[CC BY-NC-SA 4.0](LICENSE): free for anyone to use, share and modify for
+**non-commercial** purposes. Changes you share must credit this project and be
+released under the same license, so it stays open. Selling it, or using it in
+a commercial product or service, is not allowed without permission from the
+copyright holder.
