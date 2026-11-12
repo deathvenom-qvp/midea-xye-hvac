@@ -26,7 +26,7 @@ No cloud, no Wi-Fi dongle.
 
 1. Wire the ESP32 + RS-485 transceiver (tested with [this TTL-to-RS485 module](https://www.amazon.com/dp/B0BKG7SC54)) to X / Y / E ([docs/hardware.md](docs/hardware.md)).
    Want a tidy board? ken's PCB is on [OSHWLab](https://oshwlab.com/ken.mickens_1966/esp32-mod-bus) ([details](hardware/pcb/README.md)), with spare I/O broken out for add-on sensors or relays.
-2. Copy [`examples/midea-xye-hvac.yaml`](examples/midea-xye-hvac.yaml) into your ESPHome
+2. Copy [`examples/device-example.yaml`](examples/device-example.yaml) into your ESPHome
    config folder. Adjust `esp32:` for your board and the `xye_rx_pin` / `xye_tx_pin`
    substitutions if needed.
 3. Add `wifi_ssid`, `wifi_password` and `ota_password` to `secrets.yaml` (see [Secrets](#secrets) below).
@@ -80,8 +80,8 @@ Notes:
 | Path | Contents |
 |---|---|
 | `components/xye_climate/` | ESPHome external component (C++ / Python) |
-| `midea-xye-hvac.yaml` | Core package: climate, sensors, switches, buttons |
-| `examples/` | Device file to copy |
+| `midea-xye-hvac.yaml` | Core package, pulled in automatically. **Don't paste this one into ESPHome.** |
+| `examples/device-example.yaml` | **The file you paste into ESPHome** (one per unit) |
 | `docs/protocol.md` | XYE frame formats and byte maps |
 | `docs/hardware.md` | Parts and wiring |
 | `hardware/pcb/` | PCB project details ([OSHWLab](https://oshwlab.com/ken.mickens_1966/esp32-mod-bus)) |

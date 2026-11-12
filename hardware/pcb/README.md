@@ -51,7 +51,7 @@ packages:
     ref: main
 ```
 
-A full example device file is in `examples/midea-xye-hvac.yaml`.
+A full example device file is in `examples/device-example.yaml`.
 
 # Announcements
 * Connect only to **X / Y / E**. **Never** connect to **HA/HB** (wired controller bus, about 18 V) or **S / S1 / S2 / N** (indoor-outdoor link, often at mains potential).
