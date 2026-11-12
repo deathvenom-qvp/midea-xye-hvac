@@ -1,6 +1,6 @@
 # Midea XYE HVAC
 
-> **vibe coded to the max**
+<p align="center"><img src="docs/img/vibe-coded.svg" alt="VIBE CODED TO THE MAX" width="720"></p>
 
 Fully local Home Assistant control of Midea-family heat pumps, air handlers and
 mini-splits (Midea, ACiQ, Carrier / Bryant rebadges, and similar) through the
