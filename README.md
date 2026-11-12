@@ -1,5 +1,7 @@
 # Midea XYE HVAC
 
+> **vibe coded to the max**
+
 Fully local Home Assistant control of Midea-family heat pumps, air handlers and
 mini-splits (Midea, ACiQ, Carrier / Bryant rebadges, and similar) through the
 indoor unit's **XYE / CCM RS-485 terminals**, using an ESP32 and ESPHome.
@@ -58,6 +60,26 @@ The indoor coil reading is clamped at 99 °F by the unit.
 Tested on an ACiQ (Midea) high-static ducted air handler set to °F. Other units
 should work; if yours reports something odd, see
 [docs/capture-workflow.md](docs/capture-workflow.md).
+
+## Credits
+
+Built by [deathvenom-qvp](https://github.com/deathvenom-qvp) together with
+**Claude** (Anthropic), via Claude Code: protocol analysis, the ESPHome
+component, tools and docs.
+
+Standing on the shoulders of:
+
+* [wtahler/esphome-mideaXYE-rs485](https://github.com/wtahler/esphome-mideaXYE-rs485): the ESPHome XYE firmware this project grew out of
+* [Bunicutz/ESP32_Midea_RS485](https://github.com/Bunicutz/ESP32_Midea_RS485) and
+  [Chron-O-John/esphome-mideaXYE-rs485-esp-idf-manual-flow-control](https://github.com/Chron-O-John/esphome-mideaXYE-rs485-esp-idf-manual-flow-control): C3 command layout, confirmed on a Carrier 40MBAB
+* [mdrobnak/esphome](https://github.com/mdrobnak/esphome) and [HomeOps/ESPHome-Midea-XYE](https://github.com/HomeOps/ESPHome-Midea-XYE): XYE climate work, C4 / C6 frames
+* [Codeberg XYE protocol notes](https://codeberg.org/xye/xye): frame and byte reference
+* Home Assistant community thread [Midea A/C via local XYE](https://community.home-assistant.io/t/midea-a-c-via-local-xye/857679)
+* [ALLTERCO/shelly-script-examples](https://github.com/ALLTERCO/shelly-script-examples) (Midea XYE script): reply byte map
+* [fmck3516/midea-telemetry-esphome](https://github.com/fmck3516/midea-telemetry-esphome): outdoor-unit test-port telemetry
+* [fabianschwamborn/HVAC-shark](https://github.com/fabianschwamborn/HVAC-shark): Midea bus sniffing notes
+* ESPHome's [Midea climate component](https://esphome.io/components/climate/midea/) and the midea-msmart / midea-ac-py projects: Wi-Fi dongle protocol
+* ACiQ service manuals (CD-HH-MC ducted, multi-zone condenser, K-series): DIP switches, error codes, service modes
 
 ## License
 
