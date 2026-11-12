@@ -2,6 +2,8 @@
 
 ## Parts
 
+* **Ready-made PCB:** [ESP32 Mod Bus on OSHWLab](https://oshwlab.com/ken.mickens_1966/esp32-mod-bus), editable in [EasyEDA Pro](https://pro.easyeda.com/editor#id=e4bf7a95361d40da907ab74b8c0c1d2d). See [hardware/pcb](../hardware/pcb/README.md).
+
 * ESP32 / ESP32-S3 board (any ESPHome-supported ESP32).
 * RS-485 transceiver with **automatic direction control** (MAX13487 / "auto
   flow" TTL-485 modules). For a MAX485 with DE/RE, add
