@@ -1,6 +1,10 @@
 # =============================================================================
 # Midea XYE HVAC - core package
 # =============================================================================
+# !!  DON'T PASTE THIS FILE INTO ESPHOME AS A DEVICE.  It has no name, board
+# !!  or Wi-Fi, so ESPHome says "'name' is a required option for [esphome]".
+# !!  Use examples/midea-xye-hvac.yaml instead. It pulls this file in for you.
+#
 # Local control of a Midea-family indoor unit (Midea, ACiQ, Carrier/Bryant
 # rebadges, Senville, MrCool, ...) through its XYE / "CCM" RS-485 terminals.
 #
