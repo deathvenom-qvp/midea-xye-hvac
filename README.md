@@ -38,6 +38,9 @@ No cloud, no Wi-Fi dongle.
 The example pulls the component and the core package straight from this repo, so
 updates arrive on your next install.
 
+> **Running multiple units?** Check out my other project,
+> [ESPHOME-Device-Scan](https://github.com/deathvenom-qvp/ESPHOME-Device-Scan).
+
 ## Secrets
 
 The example YAML never contains passwords. Lines like `password: !secret wifi_password`
