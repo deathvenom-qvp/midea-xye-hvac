@@ -24,7 +24,7 @@ No cloud, no Wi-Fi dongle.
 
 ## Quick start
 
-1. Wire the ESP32 + RS-485 transceiver to X / Y / E ([docs/hardware.md](docs/hardware.md)).
+1. Wire the ESP32 + RS-485 transceiver (tested with [this TTL-to-RS485 module](https://www.amazon.com/dp/B0BKG7SC54)) to X / Y / E ([docs/hardware.md](docs/hardware.md)).
 2. Copy [`examples/midea-xye-hvac.yaml`](examples/midea-xye-hvac.yaml) into your ESPHome
    config folder. Adjust `esp32:` for your board and the `xye_rx_pin` / `xye_tx_pin`
    substitutions if needed.

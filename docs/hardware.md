@@ -6,6 +6,12 @@
 * RS-485 transceiver with **automatic direction control** (MAX13487 / "auto
   flow" TTL-485 modules). For a MAX485 with DE/RE, add
   `flow_control_pin:` to the `uart:` block.
+* **Tested module:** the generic "TTL to RS485 to UART Converter Serial Adapter
+  3.3V 5V Compatible with MAX485 Chip" board
+  ([Amazon B0BKG7SC54](https://www.amazon.com/dp/B0BKG7SC54)). It has 4 pins
+  on the TTL side (VCC, TXD, RXD, GND) and switches direction on its own, so no
+  `flow_control_pin` is needed. Power it from the ESP's 3.3 V pin so its logic
+  levels match the ESP32.
 * 5-12 V supply, or power from the unit if it offers a low-voltage rail.
 
 ## Wiring
