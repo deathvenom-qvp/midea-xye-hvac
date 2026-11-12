@@ -1,0 +1,365 @@
+# =============================================================================
+# Midea air handler - XYE bus SNIFFER (listen-only)
+# =============================================================================
+# Capture tool: records every XYE frame so you can map a new unit.
+#
+# What it does
+#   * Reads every byte on the XYE bus, frames it (0xAA ... CRC 0x55, any
+#     length), timestamps it and publishes it to Home Assistant as an
+#     `esphome.xye_frame` event + a "XYE Last Frame" text sensor.
+#   * Never sends SET (C3) commands, no "protection" logic, no poke & scan.
+#   * The ONLY thing it can transmit is the read-only C0 status query, and
+#     only while the "XYE Query Poll" switch is ON (default OFF). It waits
+#     for the bus to be quiet before sending, so it won't talk over another
+#     controller.
+#   * For a hardware guarantee of listen-only, delete `tx_pin:` below
+#     (the query poll then simply does nothing).
+#
+# Home Assistant side: Settings > Devices & services > ESPHome > this device
+#   > Configure > tick "Allow the device to perform Home Assistant actions".
+#   Without that, the esphome.xye_frame events are not delivered.
+#
+# Files: put xye_sniffer.h next to this YAML in your ESPHome config folder.
+# =============================================================================
+
+substitutions:
+  friendly_name: "XYE Sniffer"
+  xye_rx_pin: GPIO16
+  xye_tx_pin: GPIO17
+
+esphome:
+  name: xye-sniffer
+  name_add_mac_suffix: true
+  friendly_name: ${friendly_name}
+  includes:
+    - xye_sniffer.h
+
+esp32:
+  # Your board is an ESP32-S3 (confirmed by esptool), not a plain ESP32.
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 8MB            # esptool flash ID 0x174020 = 8 MB
+  framework:
+    type: arduino
+
+logger:
+  level: INFO                # set to DEBUG to also print every frame in the log
+  # UART0 (USB) is free now that XYE uses the ESPHome uart component on UART2.
+
+api:
+ota:
+  - platform: esphome
+    password: !secret ota_password
+  - platform: web_server     # lets you upload a .bin from the device's web page
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  fast_connect: true
+  ap:
+    ssid: "XYE Sniffer Fallback"
+    password: !secret wifi_password
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+
+uart:
+  id: xye_uart
+  rx_pin: ${xye_rx_pin}
+  tx_pin: ${xye_tx_pin}      # remove for hardware listen-only
+  baud_rate: 4800
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 2048       # ~4 s of continuous bus traffic, nothing lost if WiFi stalls
+  # If your RS-485 board has a DE/RE pin (MAX485 without auto-direction),
+  # add:  flow_control_pin: GPIOxx
+
+globals:
+  - id: poll_last_ms
+    type: uint32_t
+    initial_value: '0'
+
+# -----------------------------------------------------------------------------
+# Frame publisher: one HA event per frame.
+# -----------------------------------------------------------------------------
+script:
+  - id: publish_frame
+    mode: queued
+    max_runs: 50
+    parameters:
+      seq: int
+      ms: int
+      src: string
+      hex: string
+      crc_ok: bool
+    then:
+      - homeassistant.event:
+          event: esphome.xye_frame
+          data:
+            seq: !lambda 'return to_string(seq);'
+            ms: !lambda 'return to_string(ms);'
+            src: !lambda 'return src;'
+            len: !lambda 'return to_string((hex.size() + 1) / 3);'
+            hex: !lambda 'return hex;'
+            crc_ok: !lambda 'return crc_ok ? std::string("true") : std::string("false");'
+
+# -----------------------------------------------------------------------------
+# Main loop: drain UART -> framer -> publish. Also runs the optional poll.
+# -----------------------------------------------------------------------------
+interval:
+  - interval: 10ms
+    then:
+      - lambda: |-
+          const uint32_t now = millis();
+          uint8_t b;
+          while (id(xye_uart).available() > 0 && id(xye_uart).read_byte(&b)) {
+            xye_sniffer.feed(b, now);
+          }
+          xye_sniffer.poll(now);
+
+          // Optional read-only status poll (C0). Only when the bus is quiet.
+          if (id(query_poll).state) {
+            const uint32_t period = (uint32_t) (id(poll_seconds).state * 1000.0f);
+            if (now - id(poll_last_ms) >= period && xye_sniffer.bus_idle(now, 150)) {
+              id(xye_uart).write_array(xye::QUERY_C0, 16);
+              xye_sniffer.note_tx(xye::QUERY_C0, 16, now);
+              id(poll_last_ms) = now;
+            }
+          }
+
+          // Publish up to 4 frames per tick so the API never floods.
+          int budget = 4;
+          while (!xye_sniffer.out.empty() && budget-- > 0) {
+            xye::Frame f = std::move(xye_sniffer.out.front());
+            xye_sniffer.out.pop_front();
+            if (f.src == "echo" && !id(publish_echo).state) continue;
+            if (id(changed_only).state && f.src == "bus") {
+              static std::string prev_resp;
+              const std::string h = xye::to_hex(f.data);
+              if (f.data.size() == 32) {
+                if (h == prev_resp) continue;
+                prev_resp = h;
+              }
+            }
+            const std::string hex = xye::to_hex(f.data);
+            ESP_LOGD("xye", "#%u %6u %-6s %s%s", (unsigned) f.seq, (unsigned) f.ms, f.src.c_str(), hex.c_str(),
+                     f.crc_ok ? "" : "  (no valid CRC)");
+            char line[256];
+            snprintf(line, sizeof(line), "#%u %s %s", (unsigned) f.seq, f.src.c_str(), hex.c_str());
+            id(last_frame).publish_state(line);
+            if (f.src == "bus" && f.data.size() == 32) id(last_response).publish_state(hex);
+            if (id(publish_events).state)
+              id(publish_frame).execute((int) f.seq, (int) f.ms, f.src, hex, f.crc_ok);
+          }
+
+# -----------------------------------------------------------------------------
+# Controls
+# -----------------------------------------------------------------------------
+switch:
+  - platform: template
+    name: "XYE Query Poll"
+    id: query_poll
+    icon: mdi:help-network
+    optimistic: true
+    restore_mode: ALWAYS_OFF    # boots listen-only, every time
+  - platform: template
+    name: "XYE Publish Events"
+    id: publish_events
+    icon: mdi:broadcast
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+  - platform: template
+    name: "XYE Publish Only Changed Replies"
+    id: changed_only
+    icon: mdi:filter
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+  - platform: template
+    name: "XYE Allow Test SET"
+    # Safety latch for the one-shot C3 test button. Boots OFF, and turns
+    # itself OFF again right after one SET is sent.
+    id: allow_set
+    icon: mdi:shield-alert
+    optimistic: true
+    restore_mode: ALWAYS_OFF
+  - platform: template
+    name: "XYE Publish Own Echo"
+    id: publish_echo
+    icon: mdi:repeat
+    entity_category: config
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+
+number:
+  - platform: template
+    name: "XYE Poll Interval"
+    id: poll_seconds
+    icon: mdi:timer-outline
+    entity_category: config
+    unit_of_measurement: s
+    min_value: 1
+    max_value: 60
+    step: 1
+    initial_value: 3
+    restore_value: true
+    optimistic: true
+    mode: box
+
+button:
+  - platform: restart
+    name: "Restart ESP"
+  - platform: template
+    name: "XYE Query Once"
+    icon: mdi:send
+    on_press:
+      - lambda: |-
+          const uint32_t now = millis();
+          if (xye_sniffer.bus_idle(now, 150)) {
+            id(xye_uart).write_array(xye::QUERY_C0, 16);
+            xye_sniffer.note_tx(xye::QUERY_C0, 16, now);
+          } else {
+            ESP_LOGW("xye", "Bus busy, query not sent");
+          }
+
+  - platform: template
+    name: "XYE Test SET Heat 68F Auto"
+    # Sends ONE C3 frame: mode heat (0x84), fan auto (0x80), setpoint 68 F (0x44).
+    # Layout confirmed by the 2026-11-11 sweep + Carrier 40MBAB (Chron-O-John).
+    # Needs "XYE Allow Test SET" ON first. Reads status back 2 s later.
+    icon: mdi:send-check
+    on_press:
+      - if:
+          condition:
+            switch.is_off: allow_set
+          then:
+            - logger.log:
+                level: WARN
+                format: "Turn on 'XYE Allow Test SET' first"
+          else:
+            - lambda: |-
+                uint8_t f[16] = {0xAA, 0xC3, 0x00, 0x00, 0x80, 0x00, 0x84, 0x80,
+                                 0x44, 0x00, 0x00, 0x00, 0x00, 0x3C, 0x00, 0x55};
+                f[14] = xye::checksum(f, 16);
+                const uint32_t now = millis();
+                id(xye_uart).write_array(f, 16);
+                xye_sniffer.note_tx(f, 16, now);
+                ESP_LOGW("xye", "Test SET sent: %s",
+                         xye::to_hex(std::vector<uint8_t>(f, f + 16)).c_str());
+            - switch.turn_off: allow_set
+            - delay: 2s
+            - lambda: |-
+                const uint32_t now = millis();
+                id(xye_uart).write_array(xye::QUERY_C0, 16);
+                xye_sniffer.note_tx(xye::QUERY_C0, 16, now);
+
+# -----------------------------------------------------------------------------
+# Raw capture entities
+# -----------------------------------------------------------------------------
+text_sensor:
+  - platform: template
+    name: "XYE Last Frame"
+    id: last_frame
+    icon: mdi:code-array
+  - platform: template
+    name: "XYE Last Response"
+    id: last_response
+    icon: mdi:code-array
+  - platform: template
+    name: "XYE Last Foreign Command"
+    id: last_foreign
+    icon: mdi:account-network
+    update_interval: 5s
+    lambda: |-
+      if (xye_sniffer.last_foreign.empty()) return {"none seen"};
+      return xye_sniffer.last_foreign;
+
+sensor:
+  # ---- bus statistics ----
+  - platform: template
+    name: "XYE Frames OK"
+    icon: mdi:counter
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 10s
+    lambda: 'return xye_sniffer.frames_ok;'
+  - platform: template
+    name: "XYE Fragments"
+    icon: mdi:counter
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 10s
+    lambda: 'return xye_sniffer.frags;'
+  - platform: template
+    name: "XYE Foreign Commands"
+    # Key topology test: >0 means another controller talks on this bus.
+    icon: mdi:account-network
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 10s
+    lambda: 'return xye_sniffer.foreign_cmds;'
+  - platform: template
+    name: "XYE Bytes Received"
+    icon: mdi:counter
+    entity_category: diagnostic
+    accuracy_decimals: 0
+    state_class: total_increasing
+    update_interval: 10s
+    lambda: 'return xye_sniffer.bytes;'
+
+  # ---- candidate decode of the last 32-byte reply ----
+  # Byte positions are the community map; the catalog run confirms them.
+  # This unit reports plain °F (verified against the Midea integration).
+  - platform: template
+    name: "XYE T1 Return Air (candidate)"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: 'return xye_sniffer.have_resp ? xye_temp_f(xye_sniffer.resp[11]) : NAN;'
+  - platform: template
+    name: "XYE T2A Coil (candidate)"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: 'return xye_sniffer.have_resp ? xye_temp_f(xye_sniffer.resp[12]) : NAN;'
+  - platform: template
+    name: "XYE T2B Coil (candidate)"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: 'return xye_sniffer.have_resp ? xye_temp_f(xye_sniffer.resp[13]) : NAN;'
+  - platform: template
+    name: "XYE T3 Outdoor (candidate)"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 5s
+    lambda: 'return xye_sniffer.have_resp ? xye_temp_f(xye_sniffer.resp[14]) : NAN;'
+  - platform: template
+    name: "XYE Setpoint Raw (candidate)"
+    icon: mdi:thermometer-check
+    unit_of_measurement: "°F"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: 'return xye_sniffer.have_resp ? (float) xye_sniffer.resp[10] : NAN;'
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+

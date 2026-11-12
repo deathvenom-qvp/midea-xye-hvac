@@ -1,0 +1,6 @@
+secrets.yaml
+.esphome/
+__pycache__/
+*.pyc
+capture*.log
+report/

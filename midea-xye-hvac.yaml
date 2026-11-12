@@ -1,0 +1,275 @@
+# =============================================================================
+# Midea XYE HVAC - core package
+# =============================================================================
+# Local control of a Midea-family indoor unit (Midea, ACiQ, Carrier/Bryant
+# rebadges, Senville, MrCool, ...) through its XYE / "CCM" RS-485 terminals.
+#
+# Include it from a device file (see examples/). The device file supplies the
+# board, Wi-Fi, API/OTA and these substitutions:
+#
+#   xye_rx_pin, xye_tx_pin      UART pins to the RS-485 transceiver
+#   climate_name                name of the climate entity
+#   min_setpoint_f / max_setpoint_f
+#   follow_me_celsius           true = C6 temperature byte in whole °C
+#   follow_me_source_f          true = follow-me sensor in HA reports °F
+#
+# Behaviour
+#   * Polls with the read-only C0 query every 3 s (or listens only, when a
+#     wired thermostat already polls the same bus: "shared-bus mode").
+#   * Sends a C3 SET only when you change mode / fan / setpoint in HA, built
+#     from the unit's last reported state. Never at boot, never on a timer.
+#   * "XYE Control Enabled" off = read-only monitor.
+#   * Follow-me: type any temperature entity into "Follow Me Sensor" on the
+#     device page. Blank = the unit keeps its thermostat / own sensor.
+# =============================================================================
+
+substitutions:
+  xye_rx_pin: GPIO16
+  xye_tx_pin: GPIO17
+  climate_name: "HVAC"
+  min_setpoint_f: "61"
+  max_setpoint_f: "86"
+  follow_me_celsius: "true"
+  follow_me_source_f: "true"
+
+external_components:
+  - source: github://GITHUB_OWNER/midea-xye-hvac@main
+    components: [xye_climate]
+    refresh: 1d
+
+esphome:
+  on_boot:
+    priority: -100            # after all setup, before HA connects
+    then:
+      - lambda: |-
+          id(fm_boot_entity) = id(fm_entity).state;
+          id(hvac).set_follow_me_entity(id(fm_entity).state);
+          id(fm_booted) = true;
+
+api:
+  homeassistant_states: true   # lets the device read the follow-me sensor
+
+uart:
+  id: xye_uart
+  rx_pin: ${xye_rx_pin}
+  tx_pin: ${xye_tx_pin}
+  baud_rate: 4800
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 512
+
+climate:
+  - platform: xye_climate
+    id: hvac
+    name: "${climate_name}"
+    uart_id: xye_uart
+    poll_interval: 3s
+    min_setpoint_f: ${min_setpoint_f}
+    max_setpoint_f: ${max_setpoint_f}
+    follow_me_interval: 60s
+    follow_me_celsius: ${follow_me_celsius}       # C6 temp byte: whole °C (documented) or °F
+    follow_me_source_fahrenheit: ${follow_me_source_f}   # unit of the chosen HA sensor
+
+globals:
+  - id: fm_boot_entity
+    type: std::string
+  - id: fm_booted
+    type: bool
+    initial_value: 'false'
+
+# Follow-me sensor picked in HA (device page > Configuration). Blank = the unit
+# keeps whatever the thermostat / air handler is set to. Changing it restarts
+# the ESP so the new entity is subscribed cleanly.
+text:
+  - platform: template
+    id: fm_entity
+    name: "Follow Me Sensor"
+    icon: mdi:thermometer-lines
+    entity_category: config
+    mode: text
+    optimistic: true
+    restore_value: true
+    initial_value: ""
+    max_length: 120
+    on_value:
+      - if:
+          condition:
+            lambda: 'return id(fm_booted) && x != id(fm_boot_entity);'
+          then:
+            - logger.log: "Follow-me sensor changed; restarting to apply"
+            - delay: 2s
+            - button.press: restart_btn
+
+switch:
+  - platform: template
+    name: "Aux Heat"
+    # EXPERIMENTAL: sends C3 with mode-flag bit 1; state comes from reply b20.
+    icon: mdi:heating-coil
+    restore_mode: DISABLED     # never send anything at boot
+    lambda: 'return id(hvac).aux_heat();'
+    turn_on_action:
+      - lambda: 'id(hvac).set_aux_heat(true);'
+    turn_off_action:
+      - lambda: 'id(hvac).set_aux_heat(false);'
+  - platform: template
+    name: "XYE Control Enabled"
+    icon: mdi:shield-check
+    entity_category: config
+    restore_mode: RESTORE_DEFAULT_ON
+    lambda: 'return id(hvac).control_enabled();'
+    turn_on_action:
+      - lambda: 'id(hvac).set_control_enabled(true);'
+    turn_off_action:
+      - lambda: 'id(hvac).set_control_enabled(false);'
+
+button:
+  - platform: restart
+    id: restart_btn
+    name: "Restart ESP"
+  - platform: template
+    name: "Self Clean"
+    # EXPERIMENTAL: only works with the unit OFF. Sends mode 0x01.
+    icon: mdi:spray-bottle
+    on_press:
+      - lambda: 'id(hvac).start_self_clean();'
+  - platform: template
+    name: "XYE Query C4 (extended)"
+    icon: mdi:magnify-scan
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(hvac).query_c4();'
+  - platform: template
+    name: "XYE Query Now"
+    icon: mdi:refresh
+    entity_category: diagnostic
+    on_press:
+      - lambda: 'id(hvac).query_now();'
+
+sensor:
+  - platform: template
+    name: "Follow Me Temperature Sent"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: 'return id(hvac).follow_me_sent_f();'
+  - platform: template
+    name: "Return Air (T1)"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: 'return id(hvac).temp_f(11);'
+    filters:
+      - delta: 0.5
+  - platform: template
+    name: "Indoor Coil (T2A)"
+    # The unit clamps this at 99 F; in heat mode the real coil runs hotter.
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: 'return id(hvac).temp_f(12);'
+    filters:
+      - delta: 0.5
+  - platform: template
+    name: "Outdoor Coil (T3)"
+    unit_of_measurement: "°F"
+    device_class: temperature
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 10s
+    lambda: 'return id(hvac).temp_f(14);'
+    filters:
+      - delta: 0.5
+  - platform: template
+    name: "XYE Replies"
+    icon: mdi:counter
+    entity_category: diagnostic
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return id(hvac).reply_count();'
+  - platform: template
+    name: "XYE SET Failures"
+    icon: mdi:alert-circle-outline
+    entity_category: diagnostic
+    state_class: total_increasing
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return id(hvac).set_failures();'
+
+
+binary_sensor:
+  - platform: template
+    name: "XYE Shared Bus"
+    # On when a wired thermostat also talks on XYE; the ESP then stops its own
+    # polling and only sends your changes in the gaps.
+    icon: mdi:lan-connect
+    entity_category: diagnostic
+    lambda: 'return id(hvac).shared_bus();'
+  - platform: template
+    name: "Follow Me Active"
+    icon: mdi:thermometer-check
+    lambda: 'return id(hvac).follow_me_active();'
+  - platform: template
+    name: "XYE Link"
+    device_class: connectivity
+    entity_category: diagnostic
+    lambda: 'return id(hvac).ms_since_reply() < 15000;'
+  - platform: template
+    name: "Compressor Running"
+    device_class: running
+    lambda: 'return id(hvac).has_reply() && (id(hvac).reply_byte(19) & 0x01);'
+  - platform: template
+    name: "Self Clean Running"
+    icon: mdi:spray-bottle
+    lambda: 'return id(hvac).self_cleaning();'
+  - platform: template
+    name: "Sleep Mode"
+    icon: mdi:sleep
+    lambda: 'return id(hvac).has_reply() && (id(hvac).reply_byte(20) & 0x01);'
+  - platform: template
+    name: "Protection Active"
+    # Ignores b24 bit 1 = anti-cold-air (normal heat standby).
+    device_class: problem
+    lambda: 'return id(hvac).has_reply() && ((id(hvac).reply_byte(24) & ~0x02) | id(hvac).reply_byte(25));'
+  - platform: template
+    name: "Unit Error"
+    device_class: problem
+    lambda: 'return id(hvac).has_reply() && (id(hvac).reply_byte(22) | id(hvac).reply_byte(23) | id(hvac).reply_byte(26));'
+
+text_sensor:
+  - platform: template
+    name: "Unit Status"
+    icon: mdi:alert-circle-check
+    update_interval: 10s
+    lambda: |-
+      if (!id(hvac).has_reply()) return {"No data"};
+      const uint16_t err  = id(hvac).reply_byte(22) | (id(hvac).reply_byte(23) << 8);
+      const uint16_t prot = id(hvac).reply_byte(24) | (id(hvac).reply_byte(25) << 8);
+      const uint8_t  ccm  = id(hvac).reply_byte(26);
+      char s[64];
+      if (err || ccm) {
+        snprintf(s, sizeof(s), "Error %04X (ccm %02X)", err, ccm);
+        return {s};
+      }
+      if (prot == 0) return {"OK"};
+      if (prot == 0x0002) return {"Anti-cold-air (heat standby)"};
+      snprintf(s, sizeof(s), "Protection %04X (unknown)", prot);
+      return {s};
+  - platform: template
+    name: "XYE Last C4 Reply"
+    icon: mdi:code-array
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: 'return id(hvac).last_c4_hex();'
+  - platform: template
+    name: "XYE Last Reply"
+    icon: mdi:code-array
+    entity_category: diagnostic
+    update_interval: 30s
+    lambda: 'return id(hvac).last_reply_hex();'

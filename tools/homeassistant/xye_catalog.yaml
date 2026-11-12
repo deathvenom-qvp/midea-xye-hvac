@@ -1,0 +1,505 @@
+# =============================================================================
+# XYE command catalog - Home Assistant package
+# =============================================================================
+# Drop this file in /config/packages/ (see README for the 3 one-time setup
+# steps). It gives you:
+#
+#   script.xye_catalog_run      Steps the Midea climate entity (driven through
+#                               the Midea integration / thermostat path) through
+#                               every mode, setpoint, fan speed, swing, preset
+#                               and switch it advertises, with dwell times.
+#   script.xye_catalog_restore  Puts the unit back the way the run found it.
+#   script.xye_manual_mark      Drop a labelled marker in the log, e.g. before
+#                               pressing a button on the physical thermostat.
+#   automations                 Write every ESP-captured XYE frame and every
+#                               Midea state change to one capture file.
+#
+# Every line in the capture file is   XYE|{json}
+# (the prefix stops HA from turning the JSON into a dict before writing it).
+#
+# >>> EDIT THESE THREE LINES if your entity ids differ <<<
+#   &climate   your Midea climate entity
+#   &notify    the File-integration notify entity that writes the capture file
+#   &espPoll   the sniffer's "XYE Query Poll" switch
+# =============================================================================
+
+input_text:
+  xye_cfg_climate:
+    name: "XYE catalog: Midea climate entity"
+    max: 100
+    initial: &climate climate.my_midea_ac
+  xye_cfg_notify:
+    name: "XYE catalog: capture file notify entity"
+    max: 100
+    initial: &notify notify.file
+  xye_cfg_esp_poll:
+    name: "XYE catalog: ESP query-poll switch"
+    max: 100
+    initial: &espPoll switch.xye_sniffer_xye_query_poll
+  xye_run_step:
+    name: "XYE catalog: current step"
+    max: 255
+  xye_restore:
+    name: "XYE catalog: saved state for restore"
+    max: 255
+
+input_boolean:
+  xye_capture:
+    name: "XYE capture logging"
+    icon: mdi:record-rec
+
+# -----------------------------------------------------------------------------
+# Logging automations
+# -----------------------------------------------------------------------------
+automation:
+  - id: xye_capture_log_frames
+    alias: "XYE capture: log ESP frames"
+    description: "Write every esphome.xye_frame event to the capture file."
+    mode: queued
+    max: 500
+    max_exceeded: warning
+    trace:
+      stored_traces: 2
+    triggers:
+      - trigger: event
+        event_type: esphome.xye_frame
+    conditions:
+      - condition: state
+        entity_id: input_boolean.xye_capture
+        state: "on"
+    actions:
+      - action: notify.send_message
+        target:
+          entity_id: *notify
+        data:
+          message: >-
+            XYE|{{ {
+              "t": trigger.event.time_fired.isoformat(),
+              "kind": "frame",
+              "seq": trigger.event.data.seq | int(0),
+              "ms": trigger.event.data.ms | int(0),
+              "src": trigger.event.data.src,
+              "len": trigger.event.data.len | int(0),
+              "hex": trigger.event.data.hex,
+              "crc_ok": trigger.event.data.crc_ok == "true",
+              "step": states("input_text.xye_run_step")
+            } | to_json }}
+
+  - id: xye_capture_log_climate
+    alias: "XYE capture: log Midea climate changes"
+    description: "Timeline of what the Midea integration reports (state + attributes)."
+    mode: queued
+    max: 100
+    trace:
+      stored_traces: 2
+    triggers:
+      - trigger: state
+        entity_id: *climate
+    conditions:
+      - condition: state
+        entity_id: input_boolean.xye_capture
+        state: "on"
+    actions:
+      - action: notify.send_message
+        target:
+          entity_id: *notify
+        data:
+          message: >-
+            XYE|{{ {
+              "t": now().isoformat(),
+              "kind": "climate",
+              "step": states("input_text.xye_run_step"),
+              "state": trigger.to_state.state,
+              "attrs": trigger.to_state.attributes
+            } | to_json }}
+
+# -----------------------------------------------------------------------------
+# Helper scripts
+# -----------------------------------------------------------------------------
+script:
+  xye_mark:
+    alias: "XYE catalog: marker"
+    mode: queued
+    max: 50
+    fields:
+      step:
+        description: "Label for the step about to happen"
+        example: "hvac_mode=cool"
+    sequence:
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.xye_run_step
+        data:
+          value: "{{ step[:250] }}"
+      - action: notify.send_message
+        target:
+          entity_id: *notify
+        data:
+          message: >-
+            XYE|{{ {"t": now().isoformat(), "kind": "mark", "step": step} | to_json }}
+
+  xye_snapshot:
+    alias: "XYE catalog: snapshot Midea device"
+    description: "Log the climate entity plus every entity on the same Midea device."
+    mode: queued
+    max: 50
+    fields:
+      tag:
+        example: steady
+    sequence:
+      - variables:
+          climate: *climate
+      - action: notify.send_message
+        target:
+          entity_id: *notify
+        data:
+          message: >-
+            {%- set ns = namespace(e={}) -%}
+            {%- set dev = device_id(climate) -%}
+            {%- if dev -%}
+              {%- for eid in device_entities(dev) -%}
+                {%- if states[eid] is not none -%}
+                  {%- set ns.e = dict(ns.e, **{eid: states(eid)}) -%}
+                {%- endif -%}
+              {%- endfor -%}
+            {%- endif -%}
+            XYE|{{ {
+              "t": now().isoformat(),
+              "kind": "snap",
+              "tag": tag | default("steady"),
+              "step": states("input_text.xye_run_step"),
+              "state": states(climate),
+              "attrs": states[climate].attributes if states[climate] is not none else {},
+              "entities": ns.e
+            } | to_json }}
+
+  xye_manual_mark:
+    alias: "XYE catalog: manual marker"
+    description: >-
+      Log a labelled marker + snapshot. Use it before you press something on
+      the physical thermostat, e.g. "thermostat: lock keypad".
+    mode: queued
+    icon: mdi:map-marker-plus
+    fields:
+      label:
+        required: true
+        selector:
+          text:
+        example: "thermostat: follow-me on"
+    sequence:
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.xye_capture
+      - action: script.xye_mark
+        data:
+          step: "manual: {{ label }}"
+      - action: script.xye_snapshot
+        data:
+          tag: manual
+
+  xye_catalog_restore:
+    alias: "XYE catalog: restore saved state"
+    mode: single
+    icon: mdi:restore
+    sequence:
+      - variables:
+          climate: *climate
+          saved: "{{ states('input_text.xye_restore') | from_json if states('input_text.xye_restore') not in ['', 'unknown'] else {} }}"
+      - condition: template
+        value_template: "{{ saved.m is defined }}"
+      - if: "{{ saved.t not in [none, 'None', ''] }}"
+        then:
+          - action: climate.set_temperature
+            continue_on_error: true
+            target:
+              entity_id: "{{ climate }}"
+            data:
+              temperature: "{{ saved.t }}"
+      - if: "{{ saved.f not in [none, 'None', ''] }}"
+        then:
+          - action: climate.set_fan_mode
+            continue_on_error: true
+            target:
+              entity_id: "{{ climate }}"
+            data:
+              fan_mode: "{{ saved.f }}"
+      - if: "{{ saved.s not in [none, 'None', ''] }}"
+        then:
+          - action: climate.set_swing_mode
+            continue_on_error: true
+            target:
+              entity_id: "{{ climate }}"
+            data:
+              swing_mode: "{{ saved.s }}"
+      - if: "{{ saved.p not in [none, 'None', ''] }}"
+        then:
+          - action: climate.set_preset_mode
+            continue_on_error: true
+            target:
+              entity_id: "{{ climate }}"
+            data:
+              preset_mode: "{{ saved.p }}"
+      - action: climate.set_hvac_mode
+        continue_on_error: true
+        target:
+          entity_id: "{{ climate }}"
+        data:
+          hvac_mode: "{{ saved.m }}"
+
+  # ---------------------------------------------------------------------------
+  # The sweep
+  # ---------------------------------------------------------------------------
+  xye_catalog_run:
+    alias: "XYE catalog: run full sweep"
+    description: >-
+      Drives the Midea climate entity through everything it advertises and logs
+      ESP-captured XYE frames + Midea state to the capture file. About 60-90 min
+      with defaults. Stop it any time, then run "XYE catalog: restore saved state".
+    mode: single
+    icon: mdi:test-tube
+    fields:
+      dwell:
+        name: Dwell per step
+        description: Seconds to hold each setpoint / fan / swing / preset / switch step.
+        default: 45
+        selector:
+          number: {min: 10, max: 600, unit_of_measurement: s}
+      mode_dwell:
+        name: Dwell per HVAC mode
+        description: Seconds to hold each HVAC mode (mode changes can start or stop the compressor).
+        default: 180
+        selector:
+          number: {min: 30, max: 900, unit_of_measurement: s}
+      sweep_mode:
+        name: Mode for setpoint / fan / preset sweeps
+        default: cool
+        selector:
+          select:
+            options: [cool, heat, fan_only, dry, auto, heat_cool]
+      setpoint_step:
+        name: Setpoint step
+        description: In the climate entity's unit. Use 0.5 to probe half-degree encoding.
+        default: 1
+        selector:
+          number: {min: 0.5, max: 5, step: 0.5}
+      esp_poll:
+        name: Let the ESP poll (read-only C0 query)
+        description: >-
+          Needed if the bus is silent without it. Turn off if another controller
+          already polls the bus (the sniffer's "XYE Foreign Commands" counter > 0).
+        default: true
+        selector:
+          boolean:
+      do_modes: {name: Sweep HVAC modes, default: true, selector: {boolean: }}
+      do_setpoints: {name: Sweep setpoints, default: true, selector: {boolean: }}
+      do_fans: {name: Sweep fan modes, default: true, selector: {boolean: }}
+      do_swing: {name: Sweep swing modes, default: true, selector: {boolean: }}
+      do_presets: {name: Sweep presets, default: true, selector: {boolean: }}
+      do_switches: {name: Toggle the Midea device's switches, default: true, selector: {boolean: }}
+    sequence:
+      - variables:
+          climate: *climate
+          poll_switch: *espPoll
+          d_step: "{{ dwell | default(45) | int }}"
+          d_mode: "{{ mode_dwell | default(180) | int }}"
+          s_mode: "{{ sweep_mode | default('cool') }}"
+          sp_step: "{{ setpoint_step | default(1) | float }}"
+          use_poll: "{{ esp_poll | default(true) }}"
+          poll_was: "{{ states(poll_switch) }}"
+          hvac_list: "{{ state_attr(climate, 'hvac_modes') or [] }}"
+          fan_list: "{{ state_attr(climate, 'fan_modes') or [] }}"
+          swing_list: "{{ state_attr(climate, 'swing_modes') or [] }}"
+          preset_list: "{{ state_attr(climate, 'preset_modes') or [] }}"
+          mode_order: >-
+            {% set pref = ['off', 'fan_only', 'dry', 'cool', 'heat', 'heat_cool', 'auto'] %}
+            {% set avail = state_attr(climate, 'hvac_modes') or [] %}
+            {{ (pref | select('in', avail) | list) + (avail | reject('in', pref) | list) + ['off'] }}
+          setpoints: >-
+            {% set lo = state_attr(climate, 'min_temp') | float(16) %}
+            {% set hi = state_attr(climate, 'max_temp') | float(30) %}
+            {% set st = setpoint_step | default(1) | float %}
+            {% set n = ((hi - lo) / st) | round(0, 'floor') | int %}
+            {% set ns = namespace(v=[]) %}
+            {% for i in range(n + 1) %}{% set ns.v = ns.v + [ (lo + i * st) | round(1) ] %}{% endfor %}
+            {{ ns.v }}
+          dev_switches: >-
+            {% set dev = device_id(climate) %}
+            {{ (device_entities(dev) | select('match', 'switch\.') | list) if dev else [] }}
+
+      # Abort cleanly if the entity id is wrong.
+      - condition: template
+        value_template: "{{ states[climate] is not none and states(climate) not in ['unavailable', 'unknown'] }}"
+
+      # Save state for restore (also used by xye_catalog_restore if you stop early).
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.xye_restore
+        data:
+          value: >-
+            {{ {"m": states(climate),
+                "t": state_attr(climate, 'temperature'),
+                "f": state_attr(climate, 'fan_mode'),
+                "s": state_attr(climate, 'swing_mode'),
+                "p": state_attr(climate, 'preset_mode')} | to_json }}
+
+      - action: input_boolean.turn_on
+        target:
+          entity_id: input_boolean.xye_capture
+      - if: "{{ use_poll and states(poll_switch) not in ['unavailable', 'unknown'] }}"
+        then:
+          - action: switch.turn_on
+            target:
+              entity_id: "{{ poll_switch }}"
+
+      - action: script.xye_mark
+        data:
+          step: "run_start {{ {'hvac': hvac_list, 'fan': fan_list, 'swing': swing_list, 'preset': preset_list, 'switches': dev_switches} | to_json }}"
+      - action: script.xye_snapshot
+        data: {tag: steady}
+      - action: script.xye_mark
+        data: {step: "baseline"}
+      - delay: {seconds: "{{ d_step }}"}
+      - action: script.xye_snapshot
+        data: {tag: steady}
+
+      # ---- 1. HVAC modes --------------------------------------------------
+      - if: "{{ do_modes | default(true) }}"
+        then:
+          - repeat:
+              for_each: "{{ mode_order }}"
+              sequence:
+                - action: script.xye_mark
+                  data: {step: "hvac_mode={{ repeat.item }}"}
+                - action: climate.set_hvac_mode
+                  continue_on_error: true
+                  target: {entity_id: "{{ climate }}"}
+                  data: {hvac_mode: "{{ repeat.item }}"}
+                - delay: {seconds: "{{ d_mode }}"}
+                - action: script.xye_snapshot
+                  data: {tag: steady}
+
+      # Everything below runs in the sweep mode.
+      - action: script.xye_mark
+        data: {step: "hvac_mode={{ s_mode }}"}
+      - action: climate.set_hvac_mode
+        continue_on_error: true
+        target: {entity_id: "{{ climate }}"}
+        data: {hvac_mode: "{{ s_mode }}"}
+      - delay: {seconds: "{{ d_mode }}"}
+      - action: script.xye_snapshot
+        data: {tag: steady}
+
+      # ---- 2. Setpoints ---------------------------------------------------
+      - if: "{{ do_setpoints | default(true) }}"
+        then:
+          - repeat:
+              for_each: "{{ setpoints }}"
+              sequence:
+                - action: script.xye_mark
+                  data: {step: "temperature={{ repeat.item }}"}
+                - action: climate.set_temperature
+                  continue_on_error: true
+                  target: {entity_id: "{{ climate }}"}
+                  data: {temperature: "{{ repeat.item }}"}
+                - delay: {seconds: "{{ d_step }}"}
+                - action: script.xye_snapshot
+                  data: {tag: steady}
+
+      # ---- 3. Fan modes ---------------------------------------------------
+      - if: "{{ (do_fans | default(true)) and fan_list | count > 0 }}"
+        then:
+          - repeat:
+              for_each: "{{ fan_list }}"
+              sequence:
+                - action: script.xye_mark
+                  data: {step: "fan_mode={{ repeat.item }}"}
+                - action: climate.set_fan_mode
+                  continue_on_error: true
+                  target: {entity_id: "{{ climate }}"}
+                  data: {fan_mode: "{{ repeat.item }}"}
+                - delay: {seconds: "{{ d_step }}"}
+                - action: script.xye_snapshot
+                  data: {tag: steady}
+
+      # ---- 4. Swing modes -------------------------------------------------
+      - if: "{{ (do_swing | default(true)) and swing_list | count > 0 }}"
+        then:
+          - repeat:
+              for_each: "{{ swing_list + [swing_list[0]] }}"
+              sequence:
+                - action: script.xye_mark
+                  data: {step: "swing_mode={{ repeat.item }}"}
+                - action: climate.set_swing_mode
+                  continue_on_error: true
+                  target: {entity_id: "{{ climate }}"}
+                  data: {swing_mode: "{{ repeat.item }}"}
+                - delay: {seconds: "{{ d_step }}"}
+                - action: script.xye_snapshot
+                  data: {tag: steady}
+
+      # ---- 5. Presets (eco / boost / sleep / comfort / away ...) ----------
+      - if: "{{ (do_presets | default(true)) and preset_list | count > 0 }}"
+        then:
+          - repeat:
+              for_each: >-
+                {{ (preset_list | reject('eq', 'none') | list) + (['none'] if 'none' in preset_list else []) }}
+              sequence:
+                - action: script.xye_mark
+                  data: {step: "preset_mode={{ repeat.item }}"}
+                - action: climate.set_preset_mode
+                  continue_on_error: true
+                  target: {entity_id: "{{ climate }}"}
+                  data: {preset_mode: "{{ repeat.item }}"}
+                - delay: {seconds: "{{ d_step }}"}
+                - action: script.xye_snapshot
+                  data: {tag: steady}
+
+      # ---- 6. Device switches (aux heat, display, eco, dry, ...) ----------
+      - if: "{{ (do_switches | default(true)) and dev_switches | count > 0 }}"
+        then:
+          - repeat:
+              for_each: "{{ dev_switches }}"
+              sequence:
+                - variables:
+                    sw_orig: "{{ states(repeat.item) }}"
+                - condition: template
+                  value_template: "{{ sw_orig in ['on', 'off'] }}"
+                - action: script.xye_mark
+                  data: {step: "{{ repeat.item }}={{ 'off' if sw_orig == 'on' else 'on' }}"}
+                - action: "switch.turn_{{ 'off' if sw_orig == 'on' else 'on' }}"
+                  continue_on_error: true
+                  target: {entity_id: "{{ repeat.item }}"}
+                - delay: {seconds: "{{ d_step }}"}
+                - action: script.xye_snapshot
+                  data: {tag: steady}
+                - action: script.xye_mark
+                  data: {step: "{{ repeat.item }}={{ sw_orig }}"}
+                - action: "switch.turn_{{ sw_orig }}"
+                  continue_on_error: true
+                  target: {entity_id: "{{ repeat.item }}"}
+                - delay: {seconds: "{{ d_step }}"}
+                - action: script.xye_snapshot
+                  data: {tag: steady}
+
+      # ---- Restore and finish ---------------------------------------------
+      - action: script.xye_mark
+        data: {step: "restore"}
+      - action: script.xye_catalog_restore
+      - delay: {seconds: "{{ d_step }}"}
+      - action: script.xye_snapshot
+        data: {tag: steady}
+      - action: script.xye_mark
+        data: {step: "run_end"}
+      - if: "{{ use_poll and poll_was == 'off' }}"
+        then:
+          - action: switch.turn_off
+            target:
+              entity_id: "{{ poll_switch }}"
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.xye_run_step
+        data:
+          value: ""
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.xye_capture
