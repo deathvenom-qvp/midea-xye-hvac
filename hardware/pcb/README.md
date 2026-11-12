@@ -23,6 +23,7 @@ Typical uses:
 * **Readings:** return air (T1), indoor coil (T2A / T2B), outdoor coil (T3), compressor state, unit status text, error and protection codes, and anti-cold-air (heat standby).
 * **Follow Me:** sends any Home Assistant temperature sensor to the unit. If left blank, it falls back to the thermostat or the unit's own sensor.
 * **Shared bus:** detects a wired thermostat on the same XYE terminals and polls only when the bus is quiet.
+* **Expansion I/O:** spare ESP32 GPIO is broken out on headers for add-on devices such as I2C or DHT sensors, relays, leak detectors or status LEDs, added with normal ESPHome YAML.
 * **Listen-only option:** a switch in Home Assistant (or removing the TX pin) makes it a read-only monitor.
 
 # Principle analysis (Hardware description)
@@ -30,6 +31,7 @@ The board has three parts: power, the main controller, and the RS-485 interface.
 
 * **Power:** the ESP32-S3 module is powered over 5 V / USB, and its 3.3 V rail powers the RS-485 transceiver so logic levels match.
 * **Main controller:** the ESP32-S3 runs ESPHome with a custom `xye_climate` component. It polls the indoor unit with 16-byte query frames (C0 status, C4 extended status), parses the 32-byte replies into Home Assistant entities, and sends C3 set commands and C6 Follow Me frames.
+* **Expansion headers:** unused ESP32 GPIO (plus power and ground) is brought out so you can add auxiliary devices without modifying the board.
 * **RS-485 interface:** the MAX485 module converts the ESP's UART to the differential XYE bus. Its automatic direction control switches between transmit and receive without a GPIO.
 
 # Software code
