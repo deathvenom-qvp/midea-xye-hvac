@@ -35,7 +35,7 @@ packages:
     url: https://github.com/deathvenom-qvp/midea-xye-hvac
     ref: main
     files: [midea-xye-hvac.yaml]
-    refresh: 1d
+    refresh: 0s   # always pull the latest from GitHub on install
 
 logger:
   level: INFO
