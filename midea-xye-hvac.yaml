@@ -20,7 +20,8 @@
 #     from the unit's last reported state. Never at boot, never on a timer.
 #   * "XYE Control Enabled" off = read-only monitor.
 #   * Follow-me: type any temperature entity into "Follow Me Sensor" on the
-#     device page. Blank = the unit keeps its thermostat / own sensor.
+#     device page. "System/Thermostat Default" (or blank) = the unit keeps its
+#     thermostat / own sensor.
 # =============================================================================
 
 substitutions:
@@ -31,6 +32,7 @@ substitutions:
   max_setpoint_f: "86"
   follow_me_celsius: "true"
   follow_me_source_f: "true"
+  follow_me_default_label: "System/Thermostat Default"
 
 external_components:
   - source: github://deathvenom-qvp/midea-xye-hvac@main
@@ -42,9 +44,17 @@ esphome:
     priority: -100            # after all setup, before HA connects
     then:
       - lambda: |-
-          id(fm_boot_entity) = id(fm_entity).state;
-          id(hvac).set_follow_me_entity(id(fm_entity).state);
+          std::string s = id(fm_entity).state;
+          bool is_default = s.find('.') == std::string::npos;   // no entity id
+          id(fm_boot_entity) = is_default ? std::string() : s;
+          id(hvac).set_follow_me_entity(id(fm_boot_entity));
           id(fm_booted) = true;
+          if (is_default && s != "${follow_me_default_label}") {
+            // show a readable label instead of "unknown" / blank in HA
+            auto call = id(fm_entity).make_call();
+            call.set_value("${follow_me_default_label}");
+            call.perform();
+          }
 
 api:
   homeassistant_states: true   # lets the device read the follow-me sensor
@@ -78,8 +88,9 @@ globals:
     type: bool
     initial_value: 'false'
 
-# Follow-me sensor picked in HA (device page > Configuration). Blank = the unit
-# keeps whatever the thermostat / air handler is set to. Changing it restarts
+# Follow-me sensor picked in HA (device page > Configuration). Anything that is
+# not an entity id (the default label, or blank) = the unit keeps whatever the
+# thermostat / air handler is set to. Changing it restarts
 # the ESP so the new entity is subscribed cleanly.
 text:
   - platform: template
@@ -90,12 +101,22 @@ text:
     mode: text
     optimistic: true
     restore_value: true
-    initial_value: ""
+    initial_value: "${follow_me_default_label}"
     max_length: 120
     on_value:
       - if:
           condition:
-            lambda: 'return id(fm_booted) && x != id(fm_boot_entity);'
+            lambda: 'return id(fm_booted) && x.empty();'
+          then:
+            - text.set:
+                id: fm_entity
+                value: "${follow_me_default_label}"
+      - if:
+          condition:
+            lambda: |-
+              if (!id(fm_booted)) return false;
+              std::string k = x.find('.') == std::string::npos ? std::string() : x;
+              return k != id(fm_boot_entity);
           then:
             - logger.log: "Follow-me sensor changed; restarting to apply"
             - delay: 2s

@@ -14,7 +14,7 @@ No cloud, no Wi-Fi dongle.
 * **Status**: compressor running, sleep, self-clean running, protection, unit error,
   plain-text **Unit Status** (e.g. "Anti-cold-air (heat standby)").
 * **Follow-me**: type any HA temperature entity into **Follow Me Sensor** on the
-  device page; the unit then regulates on that room temperature. Blank = off.
+  device page; the unit then regulates on that room temperature. Leave it at **System/Thermostat Default** (or clear it) to keep the thermostat / unit sensor.
 * **Aux heat** switch and **Self Clean** button (experimental).
 * **Shared-bus mode**: works alongside a wired thermostat that also sits on XYE.
 * **Safety**: commands are only sent when you change something, built from the

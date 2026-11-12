@@ -288,6 +288,8 @@ void XyeClimate::set_follow_me_entity(const std::string &entity) {
     e.pop_back();
   while (!e.empty() && isspace((unsigned char) e.front()))
     e.erase(0, 1);
+  if (e.find('.') == std::string::npos)
+    e.clear();  // "System/Thermostat Default" or any non-entity text
   this->fm_entity_ = e;
   if (e.empty()) {
     ESP_LOGI(TAG, "Follow-me sensor not set; unit keeps its own / thermostat temperature");

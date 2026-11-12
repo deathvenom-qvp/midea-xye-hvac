@@ -81,7 +81,7 @@ Temperatures: a unit set to °C reports `(raw − 0x28) / 2` °C instead
 
 If a wired thermostat also polls XYE, the component detects its 16-byte
 commands, stops its own polling, stays in sync from the replies, and only
-transmits after 250 ms of silence. Follow-me should be left blank on such
+transmits after 250 ms of silence. Follow-me should be left at "System/Thermostat Default" on such
 units: the thermostat sends its own.
 
 ## References
