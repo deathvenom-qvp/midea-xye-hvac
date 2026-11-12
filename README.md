@@ -29,7 +29,7 @@ No cloud, no Wi-Fi dongle.
 2. Copy [`examples/midea-xye-hvac.yaml`](examples/midea-xye-hvac.yaml) into your ESPHome
    config folder. Adjust `esp32:` for your board and the `xye_rx_pin` / `xye_tx_pin`
    substitutions if needed.
-3. Add `wifi_ssid`, `wifi_password` and `ota_password` to `secrets.yaml`.
+3. Add `wifi_ssid`, `wifi_password` and `ota_password` to `secrets.yaml` (see [Secrets](#secrets) below).
 4. Install. The device appears as `midea-xye-hvac-xxxxxx`; adopt it in Home
    Assistant and rename it there.
 5. In HA: **Settings → Devices & services → ESPHome → device → Configure →
@@ -37,6 +37,40 @@ No cloud, no Wi-Fi dongle.
 
 The example pulls the component and the core package straight from this repo, so
 updates arrive on your next install.
+
+## Secrets
+
+The example YAML never contains passwords. Lines like `password: !secret wifi_password`
+tell ESPHome to look the value up in **`secrets.yaml`**, a file that sits next to your
+device YAMLs in the ESPHome config folder (`/config/esphome/secrets.yaml` on the Home
+Assistant add-on). In the ESPHome dashboard, open it with the **Secrets** button at the
+top right. Create it if it doesn't exist yet.
+
+Add these three entries, with your own values:
+
+```yaml
+# secrets.yaml
+wifi_ssid: "YourNetworkName"
+wifi_password: "YourWiFiPassword"
+ota_password: "pick-any-long-random-string"
+```
+
+| Secret | Used for |
+|---|---|
+| `wifi_ssid` | The name of the Wi-Fi network the ESP32 joins. It is case-sensitive, and the ESP32 needs a 2.4 GHz network. |
+| `wifi_password` | That network's password. It is also the password of the fallback hotspot **"Midea XYE HVAC Setup"**, which the board opens if it can't join Wi-Fi. |
+| `ota_password` | Protects wireless (OTA) firmware updates so nobody else on your network can flash the board. Any string works. Keep it, because later updates must use the same one. |
+
+Notes:
+
+* The names must match exactly. ESPHome stops with `Secret 'xxx' not defined` if one is missing.
+* Every device in the folder shares one `secrets.yaml`, so set these once and reuse them.
+* If your existing devices use different secret names (for example `ota_pin`), either add
+  the three names above or change the `!secret` names in your copy of the example.
+* Never commit `secrets.yaml` to a public repo. This repo's `.gitignore` already excludes it.
+* Optional: to encrypt the Home Assistant connection, add `encryption: key: !secret api_key`
+  under `api:` and put a key from
+  [esphome.io/components/api](https://esphome.io/components/api/) in `secrets.yaml` as `api_key`.
 
 ## Repository layout
 
