@@ -74,7 +74,11 @@ Standing on the shoulders of:
   [Chron-O-John/esphome-mideaXYE-rs485-esp-idf-manual-flow-control](https://github.com/Chron-O-John/esphome-mideaXYE-rs485-esp-idf-manual-flow-control): C3 command layout, confirmed on a Carrier 40MBAB
 * [mdrobnak/esphome](https://github.com/mdrobnak/esphome) and [HomeOps/ESPHome-Midea-XYE](https://github.com/HomeOps/ESPHome-Midea-XYE): XYE climate work, C4 / C6 frames
 * [Codeberg XYE protocol notes](https://codeberg.org/xye/xye): frame and byte reference
-* Home Assistant community thread [Midea A/C via local XYE](https://community.home-assistant.io/t/midea-a-c-via-local-xye/857679)
+* Home Assistant community threads: [Midea A/C via local XYE](https://community.home-assistant.io/t/midea-a-c-via-local-xye/857679),
+  [Full telemetry for Midea-based mini-splits / ducted units](https://community.home-assistant.io/t/full-telemetry-for-midea-based-mini-splits-centrally-ducted-units/1015912),
+  [Reverse engineering Senville/Midea S1S2 bus](https://community.home-assistant.io/t/reverse-engineering-senville-midea-scomms/992233),
+  [Hyundai (Midea clone) via RS485](https://community.home-assistant.io/t/troubleshooting-hyundai-heat-pump-midea-clone-integration-into-home-assistant-via-rs485-tcp/660986) and
+  [Midea-branded ACs with ESPHome](https://community.home-assistant.io/t/midea-branded-ac-s-with-esphome-no-cloud/265236)
 * [ALLTERCO/shelly-script-examples](https://github.com/ALLTERCO/shelly-script-examples) (Midea XYE script): reply byte map
 * [fmck3516/midea-telemetry-esphome](https://github.com/fmck3516/midea-telemetry-esphome): outdoor-unit test-port telemetry
 * [fabianschwamborn/HVAC-shark](https://github.com/fabianschwamborn/HVAC-shark): Midea bus sniffing notes
